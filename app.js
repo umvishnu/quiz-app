@@ -22,6 +22,7 @@ const el = {
   logoutButton: document.getElementById("logoutButton"),
   name: document.getElementById("name"),
   email: document.getElementById("email"),
+  phone: document.getElementById("phone"),
   otp: document.getElementById("otp"),
   otpDigits: Array.from(document.querySelectorAll(".otp-digit")),
   notesTitle: document.getElementById("notesTitle"),
@@ -71,6 +72,14 @@ function hideMessage() {
 
 function formatInr(value) {
   return `Rs. ${Number(value || 0).toLocaleString("en-IN")}`;
+}
+
+function normalizePhone(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+  if (digits.length === 12 && digits.startsWith("91")) {
+    return digits.slice(2);
+  }
+  return digits;
 }
 
 function readCachedConfig() {
@@ -299,6 +308,7 @@ async function handleRegister(event) {
   const payload = {
     name: el.name.value.trim(),
     email: el.email.value.trim().toLowerCase(),
+    phone: normalizePhone(el.phone.value),
   };
 
   try {
@@ -424,6 +434,7 @@ async function handlePayment() {
         prefill: {
           name: state.user.name,
           email: state.user.email,
+          contact: state.user.phone || "",
         },
         theme: {
           color: "#0f766e",

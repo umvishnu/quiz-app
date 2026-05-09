@@ -109,8 +109,23 @@ function normalizeEmail(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+function normalizePhone(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+  if (digits.length === 10) {
+    return digits;
+  }
+  if (digits.length === 12 && digits.startsWith("91")) {
+    return digits.slice(2);
+  }
+  return digits;
+}
+
 function isValidGmail(email) {
   return /^[a-zA-Z0-9._%+-]+@gmail\.com$/.test(email);
+}
+
+function isValidPhone(phone) {
+  return /^[6-9]\d{9}$/.test(phone);
 }
 
 function generateOtp() {
@@ -595,6 +610,7 @@ app.post("/api/auth/request-otp", async (req, res) => {
   const runtimeConfig = await getRuntimeConfig();
   const name = String(req.body.name || "").trim();
   const email = normalizeEmail(req.body.email);
+  const phone = normalizePhone(req.body.phone);
 
   if (!name || name.length < 2) {
     return res.status(400).json({ error: "Please enter a valid name." });
@@ -604,13 +620,17 @@ app.post("/api/auth/request-otp", async (req, res) => {
     return res.status(400).json({ error: "Please enter a valid Gmail address." });
   }
 
+  if (!isValidPhone(phone)) {
+    return res.status(400).json({ error: "Please enter a valid 10-digit phone number." });
+  }
+
   if (!APPS_SCRIPT_WEB_APP_URL && !transporter) {
     return res.status(500).json({
       error: "OTP delivery is not configured. Add Apps Script URL or email settings first.",
     });
   }
 
-  store.upsertUser(name, email);
+  store.upsertUser(name, email, phone);
 
   if (APPS_SCRIPT_WEB_APP_URL) {
     try {
@@ -709,6 +729,7 @@ app.post("/api/payment/create-order", requireAuth, async (req, res) => {
     }
 
     try {
+      const currentUser = store.findUserById(req.session.userId);
       const order = await razorpay.orders.create({
         amount: runtimeConfig.notesPriceInr * 100,
         currency: "INR",
@@ -717,11 +738,10 @@ app.post("/api/payment/create-order", requireAuth, async (req, res) => {
           product: runtimeConfig.notesTitle,
           userId: String(req.session.userId),
           email: req.session.userEmail || "",
+          phone: currentUser?.phone || "",
           appsScriptToken: req.session.appsScriptToken || "",
         },
       });
-
-      const currentUser = store.findUserById(req.session.userId);
       store.createOrder({
         user_id: currentUser?.id || req.session.userId,
         user_email: currentUser?.email || "",

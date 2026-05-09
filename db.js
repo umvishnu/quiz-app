@@ -35,18 +35,20 @@ function writeDb(data) {
   fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2));
 }
 
-function upsertUser(name, email) {
+function upsertUser(name, email, phone = "") {
   const data = readDb();
   let user = data.users.find((entry) => entry.email === email);
 
   if (user) {
     user.name = name;
+    user.phone = phone;
   } else {
     const id = ++data.counters.users;
     user = {
       id,
       name,
       email,
+      phone,
       verified: 0,
       created_at: new Date().toISOString(),
     };
