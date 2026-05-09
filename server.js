@@ -62,6 +62,13 @@ const transporter = hasMailConfig
       host: process.env.SMTP_HOST,
       port: Number(process.env.SMTP_PORT),
       secure: String(process.env.SMTP_SECURE || "false") === "true",
+      family: 4,
+      connectionTimeout: 30000,
+      greetingTimeout: 30000,
+      socketTimeout: 30000,
+      tls: {
+        servername: process.env.SMTP_HOST,
+      },
       auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS,
