@@ -3,7 +3,6 @@ const state = {
   email: "",
   user: null,
   driveLink: "",
-  token: localStorage.getItem("notesAuthToken") || "",
   isRequestingOtp: false,
   isVerifyingOtp: false,
   isCreatingOrder: false,
@@ -242,12 +241,15 @@ function setButtonState(button, isLoading) {
 async function api(url, options = {}) {
   const isGet = (options.method || "GET").toUpperCase() === "GET";
   const response = await fetch(`${API_BASE}${url}`, {
-    headers: isGet ? {} : { "Content-Type": "text/plain;charset=utf-8" },
-    credentials: "omit",
+    headers: isGet ? {} : { "Content-Type": "application/json" },
+    credentials: "same-origin",
     ...options,
   });
 
-  const data = await response.json();
+  const contentType = response.headers.get("content-type") || "";
+  const data = contentType.includes("application/json")
+    ? await response.json()
+    : { error: await response.text() };
   if (!response.ok) {
     throw new Error(data.error || "Something went wrong.");
   }
@@ -265,11 +267,7 @@ async function loadConfig() {
   }
 
   try {
-    const query = state.token ? `?action=config&token=${encodeURIComponent(state.token)}` : "?action=config";
-    const data = await api(query, {
-      method: "GET",
-      headers: {},
-    });
+    const data = await api("/api/config", { method: "GET" });
     writeCachedConfig(data);
     applyConfig(data);
     state.user = data.user;
@@ -307,7 +305,6 @@ async function handleRegister(event) {
     const data = await api("/api/auth/request-otp", {
       method: "POST",
       body: JSON.stringify({
-        action: "requestOtp",
         ...payload,
       }),
     });
@@ -336,15 +333,12 @@ async function handleOtpVerify(event) {
     const data = await api("/api/auth/verify-otp", {
       method: "POST",
       body: JSON.stringify({
-        action: "verifyOtp",
         email: state.email,
         otp: el.otp.value.trim(),
       }),
     });
 
     state.user = data.user;
-    state.token = data.token;
-    localStorage.setItem("notesAuthToken", data.token);
     el.welcomeText.textContent = `Welcome ${data.user.name}. After payment, the Drive link will be mailed to ${data.user.email}.`;
     el.logoutButton.classList.remove("hidden");
     hideMessage();
@@ -369,8 +363,6 @@ async function completePayment(orderId, razorpayResponse = null) {
     const data = await api("/api/payment/verify", {
       method: "POST",
       body: JSON.stringify({
-        action: "verifyPayment",
-        token: state.token,
         ...payload,
       }),
     });
@@ -401,10 +393,7 @@ async function handlePayment() {
   try {
     const order = await api("/api/payment/create-order", {
       method: "POST",
-      body: JSON.stringify({
-        action: "createOrder",
-        token: state.token,
-      }),
+      body: JSON.stringify({}),
     });
 
     if (order.provider === "razorpay") {
@@ -463,16 +452,11 @@ async function handlePayment() {
 async function handleLogout() {
   await api("/api/auth/logout", {
     method: "POST",
-    body: JSON.stringify({
-      action: "logout",
-      token: state.token,
-    }),
+    body: JSON.stringify({}),
   });
   state.user = null;
   state.email = "";
   state.driveLink = "";
-  state.token = "";
-  localStorage.removeItem("notesAuthToken");
   el.registerForm.reset();
   resetOtpInputs();
   el.logoutButton.classList.add("hidden");
