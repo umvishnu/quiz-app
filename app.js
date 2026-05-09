@@ -3,7 +3,6 @@ const state = {
   email: "",
   user: null,
   driveLink: "",
-  currentSection: "register",
   isRequestingOtp: false,
   isVerifyingOtp: false,
   isCreatingOrder: false,
@@ -48,14 +47,6 @@ const el = {
   },
   loadingOverlay: document.getElementById("loadingOverlay"),
   loadingMessage: document.getElementById("loadingMessage"),
-};
-
-const sectionOrder = ["register", "otp", "store", "success"];
-const sectionViews = {
-  register: el.registerForm,
-  otp: el.otpForm,
-  store: el.storeSection,
-  success: el.successSection,
 };
 
 function showLoading(message) {
@@ -163,32 +154,10 @@ function showDeliveryState(delivery, recoveryMessage = "") {
 }
 
 function showSection(name) {
-  const previousSection = state.currentSection;
-  const previousIndex = sectionOrder.indexOf(previousSection);
-  const nextIndex = sectionOrder.indexOf(name);
-  const direction = nextIndex >= previousIndex ? "forward" : "backward";
-  const nextView = sectionViews[name];
-  const previousView = sectionViews[previousSection];
-
-  Object.values(sectionViews).forEach((view) => {
-    view.classList.remove("hidden", "flow-active", "flow-enter-left", "flow-enter-right", "flow-exit-left", "flow-exit-right");
-  });
-
-  if (nextView && previousView && nextView !== previousView) {
-    nextView.classList.add(direction === "forward" ? "flow-enter-right" : "flow-enter-left");
-    previousView.classList.add("flow-active");
-
-    requestAnimationFrame(() => {
-      previousView.classList.add(direction === "forward" ? "flow-exit-left" : "flow-exit-right");
-      previousView.classList.remove("flow-active");
-      nextView.classList.add("flow-active");
-      nextView.classList.remove("flow-enter-right", "flow-enter-left");
-    });
-  } else if (nextView) {
-    nextView.classList.add("flow-active");
-  }
-
-  state.currentSection = name;
+  el.registerForm.classList.toggle("hidden", name !== "register");
+  el.otpForm.classList.toggle("hidden", name !== "otp");
+  el.storeSection.classList.toggle("hidden", name !== "store");
+  el.successSection.classList.toggle("hidden", name !== "success");
   el.logoutButton.classList.toggle("hidden", !state.user);
 
   Object.entries(el.chips).forEach(([key, chip]) => {

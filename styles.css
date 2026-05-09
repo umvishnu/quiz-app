@@ -281,40 +281,22 @@ h3 {
   position: relative;
   min-height: 320px;
   padding-bottom: 86px;
-  overflow: hidden;
 }
 
 .flow-view {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  pointer-events: none;
-  transform: translateX(12%);
-  transition: transform 0.34s ease, opacity 0.34s ease;
+  animation: fade-rise 0.24s ease;
 }
 
-.flow-view.flow-active {
-  opacity: 1;
-  pointer-events: auto;
-  transform: translateX(0);
-}
+@keyframes fade-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
 
-.flow-view.flow-enter-left {
-  transform: translateX(-12%);
-}
-
-.flow-view.flow-enter-right {
-  transform: translateX(12%);
-}
-
-.flow-view.flow-exit-left {
-  opacity: 0;
-  transform: translateX(-12%);
-}
-
-.flow-view.flow-exit-right {
-  opacity: 0;
-  transform: translateX(12%);
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .step-chips {
