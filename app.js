@@ -16,6 +16,7 @@ const CONFIG_CACHE_TTL_MS = 5 * 60 * 1000;
 
 const el = {
   statusMessage: document.getElementById("statusMessage"),
+  flowShell: document.querySelector(".flow-shell"),
   registerForm: document.getElementById("registerForm"),
   otpForm: document.getElementById("otpForm"),
   storeSection: document.getElementById("storeSection"),
@@ -57,6 +58,16 @@ const sectionViews = {
   store: el.storeSection,
   success: el.successSection,
 };
+
+function updateFlowShellHeight(sectionName = state.currentSection) {
+  const activeView = sectionViews[sectionName];
+  if (!activeView || !el.flowShell) return;
+
+  const statusReserve = window.innerWidth <= 640 ? 72 : 86;
+  requestAnimationFrame(() => {
+    el.flowShell.style.height = `${activeView.scrollHeight + statusReserve}px`;
+  });
+}
 
 function showLoading(message) {
   el.loadingMessage.textContent = message;
@@ -197,6 +208,7 @@ function showSection(name) {
   }
 
   state.currentSection = name;
+  updateFlowShellHeight(name);
   el.logoutButton.classList.toggle("hidden", !state.user);
 
   Object.entries(el.chips).forEach(([key, chip]) => {
@@ -533,4 +545,8 @@ el.otpDigits.forEach((input) => {
 loadConfig().catch((error) => {
   hideLoading();
   showMessage(error.message, "error");
+});
+
+window.addEventListener("resize", () => {
+  updateFlowShellHeight();
 });
