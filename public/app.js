@@ -30,6 +30,8 @@ const el = {
   sideCardLabel: document.getElementById("sideCardLabel"),
   sideCardTitle: document.getElementById("sideCardTitle"),
   sideCardDescription: document.getElementById("sideCardDescription"),
+  demoNoteSection: document.getElementById("demoNoteSection"),
+  demoNoteLink: document.getElementById("demoNoteLink"),
   notesPrice: document.getElementById("notesPrice"),
   cardTitle: document.getElementById("cardTitle"),
   cardPrice: document.getElementById("cardPrice"),
@@ -108,6 +110,7 @@ function writeCachedConfig(data) {
           sideCardLabel: data.sideCardLabel,
           sideCardTitle: data.sideCardTitle,
           sideCardDescription: data.sideCardDescription,
+          demoNoteLink: data.demoNoteLink,
           notesPriceInr: data.notesPriceInr,
           razorpayKeyId: data.razorpayKeyId,
         },
@@ -129,6 +132,9 @@ function applyConfig(data) {
   el.sideCardTitle.textContent = data.sideCardTitle || "2026 Edition";
   el.sideCardDescription.textContent =
     data.sideCardDescription || "Structured for fast purchase, verified delivery, and restricted folder access.";
+  const demoNoteLink = String(data.demoNoteLink || "").trim();
+  el.demoNoteSection.classList.toggle("hidden", !demoNoteLink);
+  el.demoNoteLink.href = demoNoteLink || "#";
   el.notesPrice.textContent = formatInr(data.notesPriceInr);
   el.cardTitle.textContent = data.notesTitle || "Premium Notes";
   el.cardPrice.textContent = formatInr(data.notesPriceInr);

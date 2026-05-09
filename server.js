@@ -40,6 +40,7 @@ const DEFAULT_CONFIG = {
   sideCardDescription:
     process.env.SIDE_CARD_DESCRIPTION ||
     "Structured for fast purchase, verified delivery, and restricted folder access.",
+  demoNoteLink: process.env.DEMO_NOTE_LINK || "",
   notesPriceInr: Number(process.env.NOTES_PRICE_INR || 999),
   otpTtlMinutes: Number(process.env.OTP_TTL_MINUTES || 10),
   driveLink: process.env.GOOGLE_DRIVE_LINK || "",
@@ -317,6 +318,7 @@ async function getRuntimeConfig() {
         SIDE_CARD_LABEL: appsScriptConfig.sideCardLabel,
         SIDE_CARD_TITLE: appsScriptConfig.sideCardTitle,
         SIDE_CARD_DESCRIPTION: appsScriptConfig.sideCardDescription,
+        DEMO_NOTE_LINK: appsScriptConfig.demoNoteLink,
         NOTES_PRICE_INR: appsScriptConfig.notesPriceInr,
         OTP_TTL_MINUTES: appsScriptConfig.otpTtlMinutes,
         GOOGLE_DRIVE_LINK: appsScriptConfig.driveLink,
@@ -336,6 +338,7 @@ async function getRuntimeConfig() {
     sideCardLabel: String(configValues.SIDE_CARD_LABEL || DEFAULT_CONFIG.sideCardLabel),
     sideCardTitle: String(configValues.SIDE_CARD_TITLE || DEFAULT_CONFIG.sideCardTitle),
     sideCardDescription: String(configValues.SIDE_CARD_DESCRIPTION || DEFAULT_CONFIG.sideCardDescription),
+    demoNoteLink: String(configValues.DEMO_NOTE_LINK || configValues["Demo Note"] || DEFAULT_CONFIG.demoNoteLink),
     notesPriceInr: Number(configValues.NOTES_PRICE_INR || DEFAULT_CONFIG.notesPriceInr),
     otpTtlMinutes: Number(configValues.OTP_TTL_MINUTES || DEFAULT_CONFIG.otpTtlMinutes),
     driveLink: String(configValues.GOOGLE_DRIVE_LINK || DEFAULT_CONFIG.driveLink),
@@ -596,6 +599,7 @@ app.get("/api/config", async (req, res) => {
     sideCardLabel: runtimeConfig.sideCardLabel,
     sideCardTitle: runtimeConfig.sideCardTitle,
     sideCardDescription: runtimeConfig.sideCardDescription,
+    demoNoteLink: runtimeConfig.demoNoteLink,
     notesPriceInr: runtimeConfig.notesPriceInr,
     paymentProvider: PAYMENT_PROVIDER,
     paymentLiveReady,

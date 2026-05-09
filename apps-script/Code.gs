@@ -30,6 +30,7 @@ function doGet(e) {
         "SIDE_CARD_DESCRIPTION",
         "Structured for fast purchase, verified delivery, and restricted folder access."
       ),
+      demoNoteLink: getConfigValue_("Demo Note", ""),
       notesPriceInr: Number(getConfigValue_("NOTES_PRICE_INR", "100")),
       paymentProvider: "razorpay",
       paymentLiveReady: Boolean(getConfigValue_("RAZORPAY_KEY_ID", "")),
@@ -414,6 +415,7 @@ function seedConfig() {
     SIDE_CARD_LABEL: "Release",
     SIDE_CARD_TITLE: "2026 Edition",
     SIDE_CARD_DESCRIPTION: "Structured for fast purchase, verified delivery, and restricted folder access.",
+    "Demo Note": "",
     NOTES_PRICE_INR: "100",
     OTP_TTL_MINUTES: "10",
     GOOGLE_DRIVE_LINK: "https://drive.google.com/drive/folders/1qFgtZFU8wYl8sD8UtIYEJxwoWg17EYJx?usp=drive_link",

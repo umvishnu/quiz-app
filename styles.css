@@ -246,6 +246,36 @@ h3 {
   line-height: 1.25;
 }
 
+.demo-note-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px 20px;
+  border-radius: 24px;
+  border: 1px solid var(--line);
+  background: linear-gradient(180deg, #ffffff, #f5faf9);
+}
+
+.demo-note-card strong {
+  display: block;
+  margin: 8px 0 6px;
+  font-size: 1.18rem;
+}
+
+.demo-note-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 18px;
+  border-radius: 16px;
+  background: rgba(15, 118, 110, 0.12);
+  color: var(--accent-dark);
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
 .status-strip {
   display: flex;
   align-items: center;
@@ -533,6 +563,11 @@ button:disabled,
     max-width: 320px;
   }
 
+  .demo-note-card {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
   .status {
     left: 28px;
     right: 28px;
@@ -620,6 +655,15 @@ button:disabled,
   .metric-card {
     padding: 16px;
     border-radius: 18px;
+  }
+
+  .demo-note-card {
+    padding: 16px;
+    border-radius: 20px;
+  }
+
+  .demo-note-button {
+    width: 100%;
   }
 
   .flow-shell {
