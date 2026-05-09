@@ -234,6 +234,13 @@ async function getRuntimeConfig() {
     return runtimeConfigCache.value;
   }
 
+  let appsScriptConfig = {};
+  try {
+    appsScriptConfig = await readAppsScriptConfig();
+  } catch (error) {
+    console.error(`Apps Script config read failed: ${error.message}`);
+  }
+
   let sheetConfig = {};
   try {
     sheetConfig = await readGoogleSheetConfig();
@@ -241,10 +248,8 @@ async function getRuntimeConfig() {
     console.error(`Google Sheet config read failed: ${error.message}`);
   }
 
-  if (!Object.keys(sheetConfig).length) {
-    try {
-      const appsScriptConfig = await readAppsScriptConfig();
-      sheetConfig = {
+  const normalizedAppsScriptConfig = Object.keys(appsScriptConfig).length
+    ? {
         APP_NAME: appsScriptConfig.appName,
         NOTES_TITLE: appsScriptConfig.notesTitle,
         NOTES_DESCRIPTION: appsScriptConfig.notesDescription,
@@ -253,23 +258,27 @@ async function getRuntimeConfig() {
         SIDE_CARD_DESCRIPTION: appsScriptConfig.sideCardDescription,
         NOTES_PRICE_INR: appsScriptConfig.notesPriceInr,
         OTP_TTL_MINUTES: appsScriptConfig.otpTtlMinutes,
-      };
-    } catch (error) {
-      console.error(`Apps Script config read failed: ${error.message}`);
-    }
-  }
+        GOOGLE_DRIVE_LINK: appsScriptConfig.driveLink,
+        GOOGLE_DRIVE_FOLDER_ID: appsScriptConfig.driveFolderId,
+      }
+    : {};
+
+  const configValues = {
+    ...sheetConfig,
+    ...normalizedAppsScriptConfig,
+  };
 
   const mergedConfig = {
-    appName: String(sheetConfig.APP_NAME || DEFAULT_CONFIG.appName),
-    notesTitle: String(sheetConfig.NOTES_TITLE || DEFAULT_CONFIG.notesTitle),
-    notesDescription: String(sheetConfig.NOTES_DESCRIPTION || DEFAULT_CONFIG.notesDescription),
-    sideCardLabel: String(sheetConfig.SIDE_CARD_LABEL || DEFAULT_CONFIG.sideCardLabel),
-    sideCardTitle: String(sheetConfig.SIDE_CARD_TITLE || DEFAULT_CONFIG.sideCardTitle),
-    sideCardDescription: String(sheetConfig.SIDE_CARD_DESCRIPTION || DEFAULT_CONFIG.sideCardDescription),
-    notesPriceInr: Number(sheetConfig.NOTES_PRICE_INR || DEFAULT_CONFIG.notesPriceInr),
-    otpTtlMinutes: Number(sheetConfig.OTP_TTL_MINUTES || DEFAULT_CONFIG.otpTtlMinutes),
-    driveLink: String(sheetConfig.GOOGLE_DRIVE_LINK || DEFAULT_CONFIG.driveLink),
-    driveFolderId: String(sheetConfig.GOOGLE_DRIVE_FOLDER_ID || DEFAULT_CONFIG.driveFolderId),
+    appName: String(configValues.APP_NAME || DEFAULT_CONFIG.appName),
+    notesTitle: String(configValues.NOTES_TITLE || DEFAULT_CONFIG.notesTitle),
+    notesDescription: String(configValues.NOTES_DESCRIPTION || DEFAULT_CONFIG.notesDescription),
+    sideCardLabel: String(configValues.SIDE_CARD_LABEL || DEFAULT_CONFIG.sideCardLabel),
+    sideCardTitle: String(configValues.SIDE_CARD_TITLE || DEFAULT_CONFIG.sideCardTitle),
+    sideCardDescription: String(configValues.SIDE_CARD_DESCRIPTION || DEFAULT_CONFIG.sideCardDescription),
+    notesPriceInr: Number(configValues.NOTES_PRICE_INR || DEFAULT_CONFIG.notesPriceInr),
+    otpTtlMinutes: Number(configValues.OTP_TTL_MINUTES || DEFAULT_CONFIG.otpTtlMinutes),
+    driveLink: String(configValues.GOOGLE_DRIVE_LINK || DEFAULT_CONFIG.driveLink),
+    driveFolderId: String(configValues.GOOGLE_DRIVE_FOLDER_ID || DEFAULT_CONFIG.driveFolderId),
   };
 
   runtimeConfigCache = {
