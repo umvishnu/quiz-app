@@ -176,6 +176,49 @@ async function callAppsScript(action, payload = {}) {
   return data;
 }
 
+async function recoverAppsScriptPendingPayment(req) {
+  if (!APPS_SCRIPT_WEB_APP_URL || !req.session?.appsScriptToken || !req.session?.pendingOrderId || !razorpay) {
+    return null;
+  }
+
+  try {
+    const paymentsResponse = await razorpay.orders.fetchPayments(req.session.pendingOrderId);
+    const payments = Array.isArray(paymentsResponse?.items) ? paymentsResponse.items : [];
+    const paidPayment = payments.find((payment) => ["captured", "authorized"].includes(String(payment.status || "")));
+
+    if (!paidPayment?.id) {
+      return null;
+    }
+
+    const signature = crypto
+      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+      .update(`${req.session.pendingOrderId}|${paidPayment.id}`)
+      .digest("hex");
+
+    const data = await callAppsScript("verifyPayment", {
+      token: req.session.appsScriptToken,
+      razorpay_order_id: req.session.pendingOrderId,
+      razorpay_payment_id: paidPayment.id,
+      razorpay_signature: signature,
+    });
+
+    req.session.pendingOrderId = "";
+
+    return {
+      emailSent: Boolean(data.deliveryEmailSent),
+      message: data.message || "Payment recovered successfully.",
+      lastError: "",
+    };
+  } catch (error) {
+    console.error(`Pending Apps Script payment recovery failed: ${error.message}`);
+    return {
+      emailSent: false,
+      message: "Payment is recorded, but delivery is still pending. It will retry automatically when you return.",
+      lastError: error.message,
+    };
+  }
+}
+
 async function readAppsScriptConfig(token = "") {
   if (!APPS_SCRIPT_WEB_APP_URL) {
     return {};
@@ -517,6 +560,7 @@ app.get("/api/config", async (req, res) => {
   let deliveryRecovery = null;
 
   if (APPS_SCRIPT_WEB_APP_URL && req.session.appsScriptToken) {
+    deliveryRecovery = await recoverAppsScriptPendingPayment(req);
     try {
       const appsScriptConfig = await readAppsScriptConfig(req.session.appsScriptToken);
       if (appsScriptConfig.latestDelivery) {
@@ -664,6 +708,7 @@ app.post("/api/payment/create-order", requireAuth, async (req, res) => {
       const data = await callAppsScript("createOrder", {
         token: req.session.appsScriptToken,
       });
+      req.session.pendingOrderId = data.orderId || "";
       return res.json({
         provider: data.provider || "razorpay",
         orderId: data.orderId,
@@ -701,6 +746,7 @@ app.post("/api/payment/create-order", requireAuth, async (req, res) => {
         amount: order.amount,
         currency: order.currency,
       });
+      req.session.pendingOrderId = order.id;
 
       return res.json({
         provider: "razorpay",
@@ -735,6 +781,7 @@ app.post("/api/payment/verify", requireAuth, async (req, res) => {
         token: req.session.appsScriptToken,
         ...req.body,
       });
+      req.session.pendingOrderId = "";
       return res.json({
         ok: true,
         driveLink: data.driveLink || runtimeConfig.driveLink,
