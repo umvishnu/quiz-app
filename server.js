@@ -176,13 +176,16 @@ async function callAppsScript(action, payload = {}) {
   return data;
 }
 
-async function readAppsScriptConfig() {
+async function readAppsScriptConfig(token = "") {
   if (!APPS_SCRIPT_WEB_APP_URL) {
     return {};
   }
 
   const url = new URL(APPS_SCRIPT_WEB_APP_URL);
   url.searchParams.set("action", "config");
+  if (token) {
+    url.searchParams.set("token", token);
+  }
 
   const response = await fetch(url.toString(), {
     method: "GET",
@@ -326,13 +329,15 @@ function getDeliveryView(delivery) {
   return {
     id: delivery.id,
     email: delivery.email,
-    paymentId: delivery.payment_id,
-    orderId: delivery.order_id,
-    driveLink: delivery.drive_link,
-    driveAccessStatus: delivery.drive_access_status,
-    emailSent: Boolean(delivery.email_sent),
-    emailSentAt: delivery.email_sent_at || "",
-    lastError: delivery.last_error || "",
+    paymentId: delivery.payment_id || delivery.paymentId || "",
+    orderId: delivery.order_id || delivery.orderId || "",
+    driveLink: delivery.drive_link || delivery.driveLink || "",
+    driveAccessStatus: delivery.drive_access_status || delivery.driveAccessStatus || "",
+    emailSent: Boolean(
+      Object.prototype.hasOwnProperty.call(delivery, "email_sent") ? delivery.email_sent : delivery.emailSent
+    ),
+    emailSentAt: delivery.email_sent_at || delivery.emailSentAt || "",
+    lastError: delivery.last_error || delivery.lastError || "",
   };
 }
 
@@ -508,7 +513,22 @@ app.get("/api/config", async (req, res) => {
   const runtimeConfig = await getRuntimeConfig();
   const user = req.session.userId ? store.findUserById(req.session.userId) : null;
   const paymentLiveReady = PAYMENT_PROVIDER === "razorpay" && hasRazorpayConfig;
-  const latestDelivery = user ? store.findLatestDeliveryByEmail(user.email) : null;
+  let latestDelivery = user ? store.findLatestDeliveryByEmail(user.email) : null;
+  let deliveryRecovery = null;
+
+  if (APPS_SCRIPT_WEB_APP_URL && req.session.appsScriptToken) {
+    try {
+      const appsScriptConfig = await readAppsScriptConfig(req.session.appsScriptToken);
+      if (appsScriptConfig.latestDelivery) {
+        latestDelivery = appsScriptConfig.latestDelivery;
+      }
+      if (appsScriptConfig.deliveryRecovery) {
+        deliveryRecovery = appsScriptConfig.deliveryRecovery;
+      }
+    } catch (error) {
+      console.error(`Apps Script delivery recovery read failed: ${error.message}`);
+    }
+  }
 
   res.json({
     appName: runtimeConfig.appName,
@@ -523,6 +543,7 @@ app.get("/api/config", async (req, res) => {
     razorpayKeyId: process.env.RAZORPAY_KEY_ID || "",
     user,
     latestDelivery: getDeliveryView(latestDelivery),
+    deliveryRecovery,
   });
 });
 
@@ -592,7 +613,7 @@ app.post("/api/auth/verify-otp", async (req, res) => {
 
   if (APPS_SCRIPT_WEB_APP_URL) {
     try {
-      await callAppsScript("verifyOtp", {
+      const data = await callAppsScript("verifyOtp", {
         email,
         otp,
       });
@@ -600,6 +621,7 @@ app.post("/api/auth/verify-otp", async (req, res) => {
       const user = store.markUserVerified(email);
       req.session.userId = user.id;
       req.session.userEmail = user.email;
+      req.session.appsScriptToken = data.token || "";
       return res.json({ ok: true, user });
     } catch (error) {
       return res.status(400).json({ error: error.message });
@@ -637,6 +659,22 @@ app.post("/api/auth/logout", (req, res) => {
 
 app.post("/api/payment/create-order", requireAuth, async (req, res) => {
   const runtimeConfig = await getRuntimeConfig();
+  if (APPS_SCRIPT_WEB_APP_URL && req.session.appsScriptToken) {
+    try {
+      const data = await callAppsScript("createOrder", {
+        token: req.session.appsScriptToken,
+      });
+      return res.json({
+        provider: data.provider || "razorpay",
+        orderId: data.orderId,
+        amount: data.amount,
+        currency: data.currency,
+      });
+    } catch (error) {
+      return res.status(500).json({ error: `Unable to create Razorpay order: ${error.message}` });
+    }
+  }
+
   if (PAYMENT_PROVIDER === "razorpay") {
     if (!razorpay) {
       return res.status(500).json({ error: "Razorpay is not configured in .env." });
@@ -689,6 +727,24 @@ app.post("/api/payment/verify", requireAuth, async (req, res) => {
 
   if (!user) {
     return res.status(404).json({ error: "User not found." });
+  }
+
+  if (APPS_SCRIPT_WEB_APP_URL && req.session.appsScriptToken) {
+    try {
+      const data = await callAppsScript("verifyPayment", {
+        token: req.session.appsScriptToken,
+        ...req.body,
+      });
+      return res.json({
+        ok: true,
+        driveLink: data.driveLink || runtimeConfig.driveLink,
+        drivePermissionStatus: data.driveAccessStatus || "",
+        deliveryEmailSent: Boolean(data.deliveryEmailSent),
+        message: data.message || "Payment verified.",
+      });
+    } catch (error) {
+      return res.status(500).json({ error: error.message });
+    }
   }
 
   let paymentId = "";
