@@ -171,29 +171,21 @@ function showSection(name) {
   const previousView = sectionViews[previousSection];
 
   Object.values(sectionViews).forEach((view) => {
-    view.classList.remove("hidden", "flow-active", "flow-enter-left", "flow-enter-right", "flow-exit-left", "flow-exit-right", "flow-visible");
+    view.classList.remove("hidden", "flow-active", "flow-enter-left", "flow-enter-right", "flow-exit-left", "flow-exit-right");
   });
 
   if (nextView && previousView && nextView !== previousView) {
-    previousView.classList.add("flow-visible", "flow-active");
-    nextView.classList.add("flow-visible", direction === "forward" ? "flow-enter-right" : "flow-enter-left");
-
-    void nextView.offsetWidth;
-
-    const exitClass = direction === "forward" ? "flow-exit-left" : "flow-exit-right";
+    nextView.classList.add(direction === "forward" ? "flow-enter-right" : "flow-enter-left");
+    previousView.classList.add("flow-active");
 
     requestAnimationFrame(() => {
-      previousView.classList.add(exitClass);
+      previousView.classList.add(direction === "forward" ? "flow-exit-left" : "flow-exit-right");
       previousView.classList.remove("flow-active");
       nextView.classList.add("flow-active");
       nextView.classList.remove("flow-enter-right", "flow-enter-left");
     });
-
-    window.setTimeout(() => {
-      previousView.classList.remove("flow-visible", "flow-exit-left", "flow-exit-right");
-    }, 360);
   } else if (nextView) {
-    nextView.classList.add("flow-visible", "flow-active");
+    nextView.classList.add("flow-active");
   }
 
   state.currentSection = name;
