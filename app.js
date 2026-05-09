@@ -178,6 +178,17 @@ function syncOtpValue() {
   el.otp.value = el.otpDigits.map((input) => input.value).join("");
 }
 
+function tryAutoSubmitOtp() {
+  if (state.isVerifyingOtp) return;
+  if (el.otp.value.length !== el.otpDigits.length) return;
+
+  window.setTimeout(() => {
+    if (!state.isVerifyingOtp && el.otp.value.length === el.otpDigits.length) {
+      el.otpForm.requestSubmit();
+    }
+  }, 120);
+}
+
 function resetOtpInputs() {
   el.otpDigits.forEach((input) => {
     input.value = "";
@@ -210,6 +221,7 @@ function handleOtpDigitInput(event) {
   const nextIndex = Math.min(index + digits.length, el.otpDigits.length - 1);
   el.otpDigits[nextIndex]?.focus();
   el.otpDigits[nextIndex]?.select();
+  tryAutoSubmitOtp();
 }
 
 function handleOtpDigitKeydown(event) {
@@ -236,6 +248,9 @@ function handleOtpPaste(event) {
   event.preventDefault();
   const pasted = (event.clipboardData?.getData("text") || "").replace(/\D/g, "").slice(0, el.otpDigits.length);
   if (!pasted) return;
+  el.otpDigits.forEach((input) => {
+    input.value = "";
+  });
   pasted.split("").forEach((digit, index) => {
     if (el.otpDigits[index]) {
       el.otpDigits[index].value = digit;
@@ -244,6 +259,7 @@ function handleOtpPaste(event) {
   syncOtpValue();
   const focusIndex = Math.min(pasted.length, el.otpDigits.length) - 1;
   el.otpDigits[Math.max(focusIndex, 0)]?.focus();
+  tryAutoSubmitOtp();
 }
 
 function setButtonState(button, isLoading) {
