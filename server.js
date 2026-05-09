@@ -22,6 +22,31 @@ const DRIVE_LINK = process.env.GOOGLE_DRIVE_LINK || "";
 const DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID || "";
 const RAZORPAY_WEBHOOK_SECRET = process.env.RAZORPAY_WEBHOOK_SECRET || "";
 const DELIVERY_RETRY_INTERVAL_MS = Number(process.env.DELIVERY_RETRY_INTERVAL_MS || 300000);
+const GOOGLE_SHEET_ID = process.env.GOOGLE_SHEET_ID || process.env.GOOGLE_SPREADSHEET_ID || "";
+const GOOGLE_CONFIG_SHEET_NAME = process.env.GOOGLE_CONFIG_SHEET_NAME || "Config";
+const CONFIG_CACHE_TTL_MS = Number(process.env.CONFIG_CACHE_TTL_MS || 60000);
+
+const DEFAULT_CONFIG = {
+  appName: process.env.APP_NAME || "Study Board",
+  notesTitle: process.env.NOTES_TITLE || "CA FINAL IDT NOTES",
+  notesDescription:
+    process.env.NOTES_DESCRIPTION ||
+    "Register with your Gmail, verify OTP, then pay to receive the Drive access link.",
+  sideCardLabel: process.env.SIDE_CARD_LABEL || "Release",
+  sideCardTitle: process.env.SIDE_CARD_TITLE || "2026 Edition",
+  sideCardDescription:
+    process.env.SIDE_CARD_DESCRIPTION ||
+    "Structured for fast purchase, verified delivery, and restricted folder access.",
+  notesPriceInr: Number(process.env.NOTES_PRICE_INR || 999),
+  otpTtlMinutes: Number(process.env.OTP_TTL_MINUTES || 10),
+  driveLink: process.env.GOOGLE_DRIVE_LINK || "",
+  driveFolderId: process.env.GOOGLE_DRIVE_FOLDER_ID || "",
+};
+
+let runtimeConfigCache = {
+  loadedAt: 0,
+  value: DEFAULT_CONFIG,
+};
 
 const hasMailConfig =
   Boolean(process.env.SMTP_HOST) &&
@@ -112,8 +137,75 @@ async function verifyMailTransport() {
   }
 }
 
+function mapSheetConfigRows(rows = []) {
+  const values = {};
+  for (const row of rows) {
+    const key = String(row[0] || "").trim();
+    if (!key) continue;
+    values[key] = row[1];
+  }
+  return values;
+}
+
+async function readGoogleSheetConfig() {
+  if (!GOOGLE_SHEET_ID || !process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE) {
+    return {};
+  }
+
+  const auth = new google.auth.GoogleAuth({
+    keyFile: process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE,
+    scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
+  });
+  const sheets = google.sheets({ version: "v4", auth });
+  const response = await sheets.spreadsheets.values.get({
+    spreadsheetId: GOOGLE_SHEET_ID,
+    range: `${GOOGLE_CONFIG_SHEET_NAME}!A:B`,
+  });
+
+  const rows = response.data.values || [];
+  if (rows.length <= 1) {
+    return {};
+  }
+
+  return mapSheetConfigRows(rows.slice(1));
+}
+
+async function getRuntimeConfig() {
+  if (Date.now() - runtimeConfigCache.loadedAt < CONFIG_CACHE_TTL_MS) {
+    return runtimeConfigCache.value;
+  }
+
+  let sheetConfig = {};
+  try {
+    sheetConfig = await readGoogleSheetConfig();
+  } catch (error) {
+    console.error(`Google Sheet config read failed: ${error.message}`);
+  }
+
+  const mergedConfig = {
+    appName: String(sheetConfig.APP_NAME || DEFAULT_CONFIG.appName),
+    notesTitle: String(sheetConfig.NOTES_TITLE || DEFAULT_CONFIG.notesTitle),
+    notesDescription: String(sheetConfig.NOTES_DESCRIPTION || DEFAULT_CONFIG.notesDescription),
+    sideCardLabel: String(sheetConfig.SIDE_CARD_LABEL || DEFAULT_CONFIG.sideCardLabel),
+    sideCardTitle: String(sheetConfig.SIDE_CARD_TITLE || DEFAULT_CONFIG.sideCardTitle),
+    sideCardDescription: String(sheetConfig.SIDE_CARD_DESCRIPTION || DEFAULT_CONFIG.sideCardDescription),
+    notesPriceInr: Number(sheetConfig.NOTES_PRICE_INR || DEFAULT_CONFIG.notesPriceInr),
+    otpTtlMinutes: Number(sheetConfig.OTP_TTL_MINUTES || DEFAULT_CONFIG.otpTtlMinutes),
+    driveLink: String(sheetConfig.GOOGLE_DRIVE_LINK || DEFAULT_CONFIG.driveLink),
+    driveFolderId: String(sheetConfig.GOOGLE_DRIVE_FOLDER_ID || DEFAULT_CONFIG.driveFolderId),
+  };
+
+  runtimeConfigCache = {
+    loadedAt: Date.now(),
+    value: mergedConfig,
+  };
+  return mergedConfig;
+}
+
 async function grantGoogleDriveAccess(email) {
-  if (!DRIVE_FOLDER_ID || !process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE) {
+  const runtimeConfig = await getRuntimeConfig();
+
+  if (!runtimeConfig.driveFolderId || !process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE) {
     return { attempted: false, status: "not_configured" };
   }
 
@@ -125,7 +217,7 @@ async function grantGoogleDriveAccess(email) {
     const drive = google.drive({ version: "v3", auth });
 
     await drive.permissions.create({
-      fileId: DRIVE_FOLDER_ID,
+      fileId: runtimeConfig.driveFolderId,
       sendNotificationEmail: false,
       requestBody: {
         type: "user",
@@ -159,15 +251,16 @@ function getDeliveryView(delivery) {
 }
 
 async function sendDeliveryEmail({ user, driveAccessStatus, driveLink }) {
+  const runtimeConfig = await getRuntimeConfig();
   await sendMail({
     to: user.email,
-    subject: `${NOTES_TITLE} access link`,
+    subject: `${runtimeConfig.notesTitle} access link`,
     text: `Your payment is successful. Access your notes here: ${driveLink}`,
     html: `
       <div style="font-family: Arial, sans-serif; padding: 24px; color: #0f172a;">
         <h2 style="margin: 0 0 12px;">Payment Successful</h2>
         <p style="margin: 0 0 12px;">Hi ${user.name},</p>
-        <p style="margin: 0 0 20px;">Your payment for <strong>${NOTES_TITLE}</strong> is successful.</p>
+        <p style="margin: 0 0 20px;">Your payment for <strong>${runtimeConfig.notesTitle}</strong> is successful.</p>
         <a href="${driveLink}" style="display: inline-block; background: #2563eb; color: #ffffff; text-decoration: none; padding: 12px 20px; border-radius: 10px; font-weight: 700;">Open Google Drive Folder</a>
         <p style="margin: 20px 0 0;">Drive permission status: ${driveAccessStatus}</p>
       </div>
@@ -176,6 +269,7 @@ async function sendDeliveryEmail({ user, driveAccessStatus, driveLink }) {
 }
 
 async function finalizeDelivery({ orderId, paymentId, paymentStatus = "captured", source = "browser" }) {
+  const runtimeConfig = await getRuntimeConfig();
   let order = store.findOrderByOrderId(orderId);
   if (!order) {
     throw new Error("Order record not found.");
@@ -195,9 +289,9 @@ async function finalizeDelivery({ orderId, paymentId, paymentStatus = "captured"
       email: user.email,
       payment_id: paymentId,
       order_id: orderId,
-      amount: order.amount || PRICE_INR * 100,
+      amount: order.amount || runtimeConfig.notesPriceInr * 100,
       currency: order.currency || "INR",
-      drive_link: DRIVE_LINK,
+      drive_link: runtimeConfig.driveLink,
       drive_permission_status: "",
       source,
     });
@@ -212,9 +306,9 @@ async function finalizeDelivery({ orderId, paymentId, paymentStatus = "captured"
       email: user.email,
       payment_id: paymentId,
       order_id: orderId,
-      amount: order.amount || PRICE_INR * 100,
+      amount: order.amount || runtimeConfig.notesPriceInr * 100,
       currency: order.currency || "INR",
-      drive_link: DRIVE_LINK,
+      drive_link: runtimeConfig.driveLink,
       source,
     });
 
@@ -249,7 +343,7 @@ async function finalizeDelivery({ orderId, paymentId, paymentStatus = "captured"
     await sendDeliveryEmail({
       user,
       driveAccessStatus: drivePermission.status,
-      driveLink: DRIVE_LINK,
+      driveLink: runtimeConfig.driveLink,
     });
 
     delivery = store.updateDelivery(delivery.id, {
@@ -323,18 +417,20 @@ function requireAuth(req, res, next) {
   return next();
 }
 
-app.get("/api/config", (req, res) => {
+app.get("/api/config", async (req, res) => {
+  const runtimeConfig = await getRuntimeConfig();
   const user = req.session.userId ? store.findUserById(req.session.userId) : null;
   const paymentLiveReady = PAYMENT_PROVIDER === "razorpay" && hasRazorpayConfig;
   const latestDelivery = user ? store.findLatestDeliveryByEmail(user.email) : null;
 
   res.json({
-    appName: process.env.APP_NAME || "Notes Access Portal",
-    notesTitle: NOTES_TITLE,
-    notesDescription:
-      process.env.NOTES_DESCRIPTION ||
-      "Buy the notes and receive the Google Drive access link in your email.",
-    notesPriceInr: PRICE_INR,
+    appName: runtimeConfig.appName,
+    notesTitle: runtimeConfig.notesTitle,
+    notesDescription: runtimeConfig.notesDescription,
+    sideCardLabel: runtimeConfig.sideCardLabel,
+    sideCardTitle: runtimeConfig.sideCardTitle,
+    sideCardDescription: runtimeConfig.sideCardDescription,
+    notesPriceInr: runtimeConfig.notesPriceInr,
     paymentProvider: PAYMENT_PROVIDER,
     paymentLiveReady,
     razorpayKeyId: process.env.RAZORPAY_KEY_ID || "",
@@ -344,6 +440,7 @@ app.get("/api/config", (req, res) => {
 });
 
 app.post("/api/auth/request-otp", async (req, res) => {
+  const runtimeConfig = await getRuntimeConfig();
   const name = String(req.body.name || "").trim();
   const email = normalizeEmail(req.body.email);
 
@@ -364,7 +461,7 @@ app.post("/api/auth/request-otp", async (req, res) => {
   store.upsertUser(name, email);
 
   const otp = generateOtp();
-  const expiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000).toISOString();
+  const expiresAt = new Date(Date.now() + runtimeConfig.otpTtlMinutes * 60 * 1000).toISOString();
 
   store.invalidateOtps(email);
   store.createOtp(email, otp, expiresAt);
@@ -372,14 +469,14 @@ app.post("/api/auth/request-otp", async (req, res) => {
   try {
     await sendMail({
       to: email,
-      subject: `${process.env.APP_NAME || "Notes Access Portal"} OTP Verification`,
-      text: `Your OTP is ${otp}. It will expire in ${OTP_TTL_MINUTES} minutes.`,
+      subject: `${runtimeConfig.appName} OTP Verification`,
+      text: `Your OTP is ${otp}. It will expire in ${runtimeConfig.otpTtlMinutes} minutes.`,
       html: `
         <div style="font-family: Arial, sans-serif; padding: 24px; color: #0f172a;">
           <h2 style="margin: 0 0 12px;">OTP Verification</h2>
           <p style="margin: 0 0 12px;">Use this OTP to login to the notes portal:</p>
           <div style="font-size: 32px; font-weight: 700; letter-spacing: 8px; margin: 20px 0;">${otp}</div>
-          <p style="margin: 0;">This OTP will expire in ${OTP_TTL_MINUTES} minutes.</p>
+          <p style="margin: 0;">This OTP will expire in ${runtimeConfig.otpTtlMinutes} minutes.</p>
         </div>
       `,
     });
@@ -424,6 +521,7 @@ app.post("/api/auth/logout", (req, res) => {
 });
 
 app.post("/api/payment/create-order", requireAuth, async (req, res) => {
+  const runtimeConfig = await getRuntimeConfig();
   if (PAYMENT_PROVIDER === "razorpay") {
     if (!razorpay) {
       return res.status(500).json({ error: "Razorpay is not configured in .env." });
@@ -431,11 +529,11 @@ app.post("/api/payment/create-order", requireAuth, async (req, res) => {
 
     try {
       const order = await razorpay.orders.create({
-        amount: PRICE_INR * 100,
+        amount: runtimeConfig.notesPriceInr * 100,
         currency: "INR",
         receipt: `notes_${req.session.userId}_${Date.now()}`,
         notes: {
-          product: NOTES_TITLE,
+          product: runtimeConfig.notesTitle,
           userId: String(req.session.userId),
           email: req.session.userEmail || "",
         },
@@ -465,13 +563,14 @@ app.post("/api/payment/create-order", requireAuth, async (req, res) => {
   return res.json({
     provider: "demo",
     orderId: `demo_${Date.now()}`,
-    amount: PRICE_INR * 100,
+    amount: runtimeConfig.notesPriceInr * 100,
     currency: "INR",
   });
 });
 
 app.post("/api/payment/verify", requireAuth, async (req, res) => {
   const user = store.findUserById(req.session.userId);
+  const runtimeConfig = await getRuntimeConfig();
 
   if (!user) {
     return res.status(404).json({ error: "User not found." });
@@ -507,7 +606,7 @@ app.post("/api/payment/verify", requireAuth, async (req, res) => {
         user_email: user.email,
         order_id: orderId,
         receipt: orderId,
-        amount: PRICE_INR * 100,
+        amount: runtimeConfig.notesPriceInr * 100,
         currency: "INR",
       });
     }
@@ -536,7 +635,7 @@ app.post("/api/payment/verify", requireAuth, async (req, res) => {
 
   res.json({
     ok: true,
-    driveLink: DRIVE_LINK,
+    driveLink: deliveryResult.delivery.drive_link || runtimeConfig.driveLink,
     drivePermissionStatus: deliveryResult.drivePermissionStatus,
     deliveryEmailSent: deliveryResult.emailSent,
     message: deliveryResult.emailSent
@@ -582,6 +681,7 @@ app.post("/api/razorpay/webhook", async (req, res) => {
 
   let order = store.findOrderByOrderId(orderId);
   if (!order) {
+    const runtimeConfig = await getRuntimeConfig();
     const userEmail =
       normalizeEmail(paymentEntity.email) ||
       normalizeEmail(paymentEntity.notes?.email) ||
@@ -599,7 +699,7 @@ app.post("/api/razorpay/webhook", async (req, res) => {
       user_email: user.email,
       order_id: orderId,
       receipt: paymentEntity.description || orderId,
-      amount: Number(paymentEntity.amount || PRICE_INR * 100),
+      amount: Number(paymentEntity.amount || runtimeConfig.notesPriceInr * 100),
       currency: paymentEntity.currency || "INR",
       webhook_received: 1,
     });
