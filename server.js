@@ -176,6 +176,26 @@ async function callAppsScript(action, payload = {}) {
   return data;
 }
 
+async function readAppsScriptConfig() {
+  if (!APPS_SCRIPT_WEB_APP_URL) {
+    return {};
+  }
+
+  const url = new URL(APPS_SCRIPT_WEB_APP_URL);
+  url.searchParams.set("action", "config");
+
+  const response = await fetch(url.toString(), {
+    method: "GET",
+  });
+
+  const data = await response.json();
+  if (!response.ok || data.ok === false) {
+    throw new Error(data.error || "Apps Script config fetch failed.");
+  }
+
+  return data;
+}
+
 function mapSheetConfigRows(rows = []) {
   const values = {};
   for (const row of rows) {
@@ -219,6 +239,24 @@ async function getRuntimeConfig() {
     sheetConfig = await readGoogleSheetConfig();
   } catch (error) {
     console.error(`Google Sheet config read failed: ${error.message}`);
+  }
+
+  if (!Object.keys(sheetConfig).length) {
+    try {
+      const appsScriptConfig = await readAppsScriptConfig();
+      sheetConfig = {
+        APP_NAME: appsScriptConfig.appName,
+        NOTES_TITLE: appsScriptConfig.notesTitle,
+        NOTES_DESCRIPTION: appsScriptConfig.notesDescription,
+        SIDE_CARD_LABEL: appsScriptConfig.sideCardLabel,
+        SIDE_CARD_TITLE: appsScriptConfig.sideCardTitle,
+        SIDE_CARD_DESCRIPTION: appsScriptConfig.sideCardDescription,
+        NOTES_PRICE_INR: appsScriptConfig.notesPriceInr,
+        OTP_TTL_MINUTES: appsScriptConfig.otpTtlMinutes,
+      };
+    } catch (error) {
+      console.error(`Apps Script config read failed: ${error.message}`);
+    }
   }
 
   const mergedConfig = {
