@@ -703,23 +703,6 @@ app.post("/api/auth/logout", (req, res) => {
 
 app.post("/api/payment/create-order", requireAuth, async (req, res) => {
   const runtimeConfig = await getRuntimeConfig();
-  if (APPS_SCRIPT_WEB_APP_URL && req.session.appsScriptToken) {
-    try {
-      const data = await callAppsScript("createOrder", {
-        token: req.session.appsScriptToken,
-      });
-      req.session.pendingOrderId = data.orderId || "";
-      return res.json({
-        provider: data.provider || "razorpay",
-        orderId: data.orderId,
-        amount: data.amount,
-        currency: data.currency,
-      });
-    } catch (error) {
-      return res.status(500).json({ error: `Unable to create Razorpay order: ${error.message}` });
-    }
-  }
-
   if (PAYMENT_PROVIDER === "razorpay") {
     if (!razorpay) {
       return res.status(500).json({ error: "Razorpay is not configured in .env." });
@@ -734,6 +717,7 @@ app.post("/api/payment/create-order", requireAuth, async (req, res) => {
           product: runtimeConfig.notesTitle,
           userId: String(req.session.userId),
           email: req.session.userEmail || "",
+          appsScriptToken: req.session.appsScriptToken || "",
         },
       });
 
@@ -892,9 +876,34 @@ app.post("/api/razorpay/webhook", async (req, res) => {
 
   const orderId = String(paymentEntity.order_id || "");
   const paymentId = String(paymentEntity.id || "");
+  const appsScriptToken = String(paymentEntity.notes?.appsScriptToken || "");
 
   if (!orderId || !paymentId) {
     return res.status(400).json({ error: "Missing order or payment id." });
+  }
+
+  if (APPS_SCRIPT_WEB_APP_URL && appsScriptToken) {
+    try {
+      const browserStyleSignature = crypto
+        .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+        .update(`${orderId}|${paymentId}`)
+        .digest("hex");
+
+      const result = await callAppsScript("verifyPayment", {
+        token: appsScriptToken,
+        razorpay_order_id: orderId,
+        razorpay_payment_id: paymentId,
+        razorpay_signature: browserStyleSignature,
+      });
+
+      return res.json({
+        ok: true,
+        emailSent: Boolean(result.deliveryEmailSent),
+        delegatedTo: "apps-script",
+      });
+    } catch (error) {
+      return res.status(500).json({ error: `Apps Script webhook delivery failed: ${error.message}` });
+    }
   }
 
   let order = store.findOrderByOrderId(orderId);
