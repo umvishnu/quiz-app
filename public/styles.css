@@ -282,7 +282,6 @@ h3 {
   min-height: 320px;
   padding-bottom: 86px;
   overflow: hidden;
-  transition: height 0.3s ease;
 }
 
 .flow-view {
