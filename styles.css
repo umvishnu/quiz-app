@@ -287,10 +287,15 @@ h3 {
 .flow-view {
   position: absolute;
   inset: 0;
+  display: none;
   opacity: 0;
   pointer-events: none;
   transform: translateX(12%);
   transition: transform 0.34s ease, opacity 0.34s ease;
+}
+
+.flow-view.flow-visible {
+  display: grid;
 }
 
 .flow-view.flow-active {
