@@ -259,6 +259,7 @@ function getDeliveryView(delivery) {
 
 async function sendDeliveryEmail({ user, driveAccessStatus, driveLink }) {
   const runtimeConfig = await getRuntimeConfig();
+  const safeUserName = user?.name || user?.email || "Student";
   await sendMail({
     to: user.email,
     subject: `${runtimeConfig.notesTitle} access link`,
@@ -266,7 +267,7 @@ async function sendDeliveryEmail({ user, driveAccessStatus, driveLink }) {
     html: `
       <div style="font-family: Arial, sans-serif; padding: 24px; color: #0f172a;">
         <h2 style="margin: 0 0 12px;">Payment Successful</h2>
-        <p style="margin: 0 0 12px;">Hi ${user.name},</p>
+        <p style="margin: 0 0 12px;">Hi ${safeUserName},</p>
         <p style="margin: 0 0 20px;">Your payment for <strong>${runtimeConfig.notesTitle}</strong> is successful.</p>
         <a href="${driveLink}" style="display: inline-block; background: #2563eb; color: #ffffff; text-decoration: none; padding: 12px 20px; border-radius: 10px; font-weight: 700;">Open Google Drive Folder</a>
         <p style="margin: 20px 0 0;">Drive permission status: ${driveAccessStatus}</p>
@@ -309,7 +310,7 @@ async function finalizeDelivery({ orderId, paymentId, paymentStatus = "captured"
     store.findDeliveryByOrderId(orderId) ||
     store.createDelivery({
       user_id: user.id,
-      name: user.name,
+      name: user.name || user.email || "Student",
       email: user.email,
       payment_id: paymentId,
       order_id: orderId,
