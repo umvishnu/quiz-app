@@ -22,6 +22,9 @@ const DRIVE_LINK = process.env.GOOGLE_DRIVE_LINK || "";
 const DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID || "";
 const RAZORPAY_WEBHOOK_SECRET = process.env.RAZORPAY_WEBHOOK_SECRET || "";
 const DELIVERY_RETRY_INTERVAL_MS = Number(process.env.DELIVERY_RETRY_INTERVAL_MS || 300000);
+const APPS_SCRIPT_WEB_APP_URL =
+  process.env.APPS_SCRIPT_WEB_APP_URL ||
+  "https://script.google.com/macros/s/AKfycbxb62i-E-dUdhJQQlYFOIQ3MdG5zYpCaaXfLsL4fDzZMlo4RBCw12IITQnQmQBWvfwW/exec";
 const GOOGLE_SHEET_ID = process.env.GOOGLE_SHEET_ID || process.env.GOOGLE_SPREADSHEET_ID || "";
 const GOOGLE_CONFIG_SHEET_NAME = process.env.GOOGLE_CONFIG_SHEET_NAME || "Config";
 const CONFIG_CACHE_TTL_MS = Number(process.env.CONFIG_CACHE_TTL_MS || 60000);
@@ -131,6 +134,11 @@ async function sendMail({ to, subject, html, text }) {
 }
 
 async function verifyMailTransport() {
+  if (APPS_SCRIPT_WEB_APP_URL) {
+    console.log(`OTP delivery delegated to Apps Script: ${APPS_SCRIPT_WEB_APP_URL}`);
+    return;
+  }
+
   if (!transporter) {
     console.warn("SMTP is not configured. OTP email sending is disabled.");
     return;
@@ -142,6 +150,30 @@ async function verifyMailTransport() {
   } catch (error) {
     console.error(`SMTP verification failed: ${error.message}`);
   }
+}
+
+async function callAppsScript(action, payload = {}) {
+  if (!APPS_SCRIPT_WEB_APP_URL) {
+    throw new Error("Apps Script OTP backend is not configured.");
+  }
+
+  const response = await fetch(APPS_SCRIPT_WEB_APP_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      action,
+      ...payload,
+    }),
+  });
+
+  const data = await response.json();
+  if (!response.ok || data.ok === false) {
+    throw new Error(data.error || `Apps Script ${action} failed.`);
+  }
+
+  return data;
 }
 
 function mapSheetConfigRows(rows = []) {
@@ -460,13 +492,25 @@ app.post("/api/auth/request-otp", async (req, res) => {
     return res.status(400).json({ error: "Please enter a valid Gmail address." });
   }
 
-  if (!transporter) {
+  if (!APPS_SCRIPT_WEB_APP_URL && !transporter) {
     return res.status(500).json({
-      error: "SMTP is not configured. Add your email settings in .env first.",
+      error: "OTP delivery is not configured. Add Apps Script URL or email settings first.",
     });
   }
 
   store.upsertUser(name, email);
+
+  if (APPS_SCRIPT_WEB_APP_URL) {
+    try {
+      const data = await callAppsScript("requestOtp", {
+        name,
+        email,
+      });
+      return res.json({ ok: true, message: data.message || "OTP sent to your Gmail." });
+    } catch (error) {
+      return res.status(500).json({ error: `Unable to send OTP email: ${error.message}` });
+    }
+  }
 
   const otp = generateOtp();
   const expiresAt = new Date(Date.now() + runtimeConfig.otpTtlMinutes * 60 * 1000).toISOString();
@@ -495,9 +539,25 @@ app.post("/api/auth/request-otp", async (req, res) => {
   }
 });
 
-app.post("/api/auth/verify-otp", (req, res) => {
+app.post("/api/auth/verify-otp", async (req, res) => {
   const email = normalizeEmail(req.body.email);
   const otp = String(req.body.otp || "").trim();
+
+  if (APPS_SCRIPT_WEB_APP_URL) {
+    try {
+      await callAppsScript("verifyOtp", {
+        email,
+        otp,
+      });
+
+      const user = store.markUserVerified(email);
+      req.session.userId = user.id;
+      req.session.userEmail = user.email;
+      return res.json({ ok: true, user });
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
+  }
 
   const otpRow = store.findLatestActiveOtp(email);
 
