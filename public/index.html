@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Study Board</title>
+    <link rel="icon" type="image/png" href="/logo.png" />
+    <link rel="apple-touch-icon" href="/logo.png" />
+    <link rel="preconnect" href="https://checkout.razorpay.com" />
+    <link rel="dns-prefetch" href="https://checkout.razorpay.com" />
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/config.js"></script>
+    <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+  </head>
+  <body class="app-loading">
+    <div id="loadingOverlay" class="loading-overlay visible" aria-live="polite" aria-busy="true">
+      <div class="loading-minimal">
+        <span class="loading-ring" aria-hidden="true"></span>
+        <p id="loadingMessage" class="loading-copy">Loading notes configuration and secure access details...</p>
+      </div>
+    </div>
+
+    <div class="page-shell app-shell">
+      <header class="topbar">
+        <div class="brand-block">
+          <div class="brand-mark">
+            <img src="/logo.png" alt="Study Board logo" class="brand-logo" />
+          </div>
+          <div>
+            <p class="eyebrow">Secure academic delivery platform</p>
+            <h1>Study Board</h1>
+            <p class="brand-subtitle">Professional notes access with OTP verification, payment confirmation, and controlled Drive sharing.</p>
+          </div>
+        </div>
+        <button id="logoutButton" class="ghost-button hidden" type="button">Logout</button>
+      </header>
+
+      <main class="layout">
+        <section class="hero-card">
+          <div class="hero-top">
+            <p class="pill">Study Board secure workflow</p>
+            <div class="hero-grid">
+              <div>
+                <h2 id="notesTitle">Premium Notes</h2>
+                <p id="notesDescription" class="hero-description">
+                  Register with your Gmail, verify with OTP, then pay to receive the Drive access link.
+                </p>
+              </div>
+              <div class="hero-sidecard">
+                <p id="sideCardLabel" class="side-label">Release</p>
+                <strong id="sideCardTitle">2026 Edition</strong>
+                <p id="sideCardDescription" class="muted">Structured for fast purchase, verified delivery, and restricted folder access.</p>
+              </div>
+            </div>
+          </div>
+          <div class="metrics-row">
+            <div class="metric-card">
+              <span>Pricing</span>
+              <strong id="notesPrice">Rs. 999</strong>
+            </div>
+            <div class="metric-card">
+              <span>Access Model</span>
+              <strong>Private Viewer Grant</strong>
+            </div>
+            <div class="metric-card">
+              <span>Fulfilment</span>
+              <strong>Instant Email Delivery</strong>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div id="statusMessage" class="status hidden"></div>
+          <div class="step-chips" aria-label="Progress">
+            <span id="chip-register" class="step-chip active">Register</span>
+            <span id="chip-otp" class="step-chip">Verify OTP</span>
+            <span id="chip-store" class="step-chip">Payment</span>
+            <span id="chip-success" class="step-chip">Access</span>
+          </div>
+
+          <div class="flow-shell">
+            <form id="registerForm" class="stack flow-view">
+              <h3>Create account</h3>
+              <p class="muted">Start with your name and Gmail ID. We will send a 6-digit OTP to verify access.</p>
+              <label>
+                <span>Name</span>
+                <input id="name" name="name" type="text" placeholder="Enter your full name" required />
+              </label>
+              <label>
+                <span>Gmail ID</span>
+                <input id="email" name="email" type="email" placeholder="example@gmail.com" required />
+              </label>
+              <button id="requestOtpButton" class="primary-button" type="submit" data-default-label="Send OTP" data-loading-label="Sending OTP...">Send OTP</button>
+            </form>
+
+            <form id="otpForm" class="stack flow-view hidden">
+              <h3>Verify OTP</h3>
+              <p class="muted">Enter the OTP sent to your Gmail inbox.</p>
+              <label>
+                <span>OTP</span>
+                <div class="otp-grid" id="otpGrid">
+                  <input class="otp-digit" type="text" inputmode="numeric" maxlength="1" autocomplete="one-time-code" aria-label="OTP digit 1" />
+                  <input class="otp-digit" type="text" inputmode="numeric" maxlength="1" aria-label="OTP digit 2" />
+                  <input class="otp-digit" type="text" inputmode="numeric" maxlength="1" aria-label="OTP digit 3" />
+                  <input class="otp-digit" type="text" inputmode="numeric" maxlength="1" aria-label="OTP digit 4" />
+                  <input class="otp-digit" type="text" inputmode="numeric" maxlength="1" aria-label="OTP digit 5" />
+                  <input class="otp-digit" type="text" inputmode="numeric" maxlength="1" aria-label="OTP digit 6" />
+                </div>
+                <input id="otp" name="otp" type="hidden" required />
+              </label>
+              <button id="verifyOtpButton" class="primary-button" type="submit" data-default-label="Verify and Login" data-loading-label="Verifying...">Verify and Login</button>
+            </form>
+
+            <section id="storeSection" class="stack flow-view hidden">
+              <h3>Buy Notes</h3>
+              <p class="muted" id="welcomeText"></p>
+              <div class="purchase-card">
+                <div>
+                  <p class="mini-label">Drive delivery</p>
+                  <strong id="cardTitle">CA FINAL IDT NOTES</strong>
+                </div>
+                <strong id="cardPrice">Rs. 999</strong>
+              </div>
+              <button id="payButton" class="primary-button" type="button" data-default-label="Pay Now" data-loading-label="Opening checkout...">Pay Now</button>
+            </section>
+
+            <section id="successSection" class="stack flow-view hidden">
+              <h3>Access sent</h3>
+              <p class="muted" id="successText"></p>
+              <a id="driveLink" class="secondary-button hidden" target="_blank" rel="noreferrer">Open Drive Folder</a>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+  </html>

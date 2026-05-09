@@ -1,0 +1,27 @@
+{
+  "name": "note-download",
+  "version": "1.0.0",
+  "description": "Notes selling website with Gmail OTP, payment, and Google Drive delivery",
+  "main": "server.js",
+  "scripts": {
+    "dev": "node --watch server.js",
+    "start": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "better-sqlite3": "^12.8.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.1",
+    "express": "^5.2.1",
+    "express-session": "^1.19.0",
+    "googleapis": "^171.4.0",
+    "jsonwebtoken": "^9.0.3",
+    "nodemailer": "^8.0.4",
+    "razorpay": "^2.9.6",
+    "uuid": "^13.0.0"
+  }
+}

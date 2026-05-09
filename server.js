@@ -1,0 +1,639 @@
+const path = require("path");
+const crypto = require("crypto");
+const express = require("express");
+const cors = require("cors");
+const session = require("express-session");
+const nodemailer = require("nodemailer");
+const Razorpay = require("razorpay");
+const { google } = require("googleapis");
+const dotenv = require("dotenv");
+const store = require("./db");
+
+dotenv.config();
+
+const app = express();
+const PORT = Number(process.env.PORT || 3000);
+const OTP_LENGTH = 6;
+const OTP_TTL_MINUTES = Number(process.env.OTP_TTL_MINUTES || 10);
+const PAYMENT_PROVIDER = (process.env.PAYMENT_PROVIDER || "demo").toLowerCase();
+const PRICE_INR = Number(process.env.NOTES_PRICE_INR || 999);
+const NOTES_TITLE = process.env.NOTES_TITLE || "CA Final IDT Notes";
+const DRIVE_LINK = process.env.GOOGLE_DRIVE_LINK || "";
+const DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID || "";
+const RAZORPAY_WEBHOOK_SECRET = process.env.RAZORPAY_WEBHOOK_SECRET || "";
+const DELIVERY_RETRY_INTERVAL_MS = Number(process.env.DELIVERY_RETRY_INTERVAL_MS || 300000);
+
+const hasMailConfig =
+  Boolean(process.env.SMTP_HOST) &&
+  Boolean(process.env.SMTP_PORT) &&
+  Boolean(process.env.SMTP_USER) &&
+  Boolean(process.env.SMTP_PASS);
+
+const hasRazorpayConfig =
+  Boolean(process.env.RAZORPAY_KEY_ID) && Boolean(process.env.RAZORPAY_KEY_SECRET);
+
+const transporter = hasMailConfig
+  ? nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: Number(process.env.SMTP_PORT),
+      secure: String(process.env.SMTP_SECURE || "false") === "true",
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+      },
+    })
+  : null;
+
+const razorpay =
+  hasRazorpayConfig && PAYMENT_PROVIDER === "razorpay"
+    ? new Razorpay({
+        key_id: process.env.RAZORPAY_KEY_ID,
+        key_secret: process.env.RAZORPAY_KEY_SECRET,
+      })
+  : null;
+
+app.use(cors());
+app.use("/api/razorpay/webhook", express.raw({ type: "application/json" }));
+app.use(express.json());
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET || "change-me-in-env",
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: false,
+      maxAge: 1000 * 60 * 60 * 8,
+    },
+  })
+);
+app.use(express.static(path.join(__dirname, "public")));
+
+function normalizeEmail(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function isValidGmail(email) {
+  return /^[a-zA-Z0-9._%+-]+@gmail\.com$/.test(email);
+}
+
+function generateOtp() {
+  const min = 10 ** (OTP_LENGTH - 1);
+  const max = 10 ** OTP_LENGTH - 1;
+  return String(Math.floor(Math.random() * (max - min + 1)) + min);
+}
+
+async function sendMail({ to, subject, html, text }) {
+  if (!transporter) {
+    throw new Error("SMTP is not configured");
+  }
+
+  await transporter.sendMail({
+    from: process.env.MAIL_FROM || process.env.SMTP_USER,
+    to,
+    subject,
+    html,
+    text,
+  });
+}
+
+async function verifyMailTransport() {
+  if (!transporter) {
+    console.warn("SMTP is not configured. OTP email sending is disabled.");
+    return;
+  }
+
+  try {
+    await transporter.verify();
+    console.log(`SMTP ready for OTP emails from ${process.env.MAIL_FROM || process.env.SMTP_USER}`);
+  } catch (error) {
+    console.error(`SMTP verification failed: ${error.message}`);
+  }
+}
+
+async function grantGoogleDriveAccess(email) {
+  if (!DRIVE_FOLDER_ID || !process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE) {
+    return { attempted: false, status: "not_configured" };
+  }
+
+  try {
+    const auth = new google.auth.GoogleAuth({
+      keyFile: process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE,
+      scopes: ["https://www.googleapis.com/auth/drive"],
+    });
+    const drive = google.drive({ version: "v3", auth });
+
+    await drive.permissions.create({
+      fileId: DRIVE_FOLDER_ID,
+      sendNotificationEmail: false,
+      requestBody: {
+        type: "user",
+        role: "reader",
+        emailAddress: email,
+      },
+    });
+
+    return { attempted: true, status: "granted" };
+  } catch (error) {
+    return {
+      attempted: true,
+      status: `failed: ${error.message}`,
+    };
+  }
+}
+
+function getDeliveryView(delivery) {
+  if (!delivery) return null;
+  return {
+    id: delivery.id,
+    email: delivery.email,
+    paymentId: delivery.payment_id,
+    orderId: delivery.order_id,
+    driveLink: delivery.drive_link,
+    driveAccessStatus: delivery.drive_access_status,
+    emailSent: Boolean(delivery.email_sent),
+    emailSentAt: delivery.email_sent_at || "",
+    lastError: delivery.last_error || "",
+  };
+}
+
+async function sendDeliveryEmail({ user, driveAccessStatus, driveLink }) {
+  await sendMail({
+    to: user.email,
+    subject: `${NOTES_TITLE} access link`,
+    text: `Your payment is successful. Access your notes here: ${driveLink}`,
+    html: `
+      <div style="font-family: Arial, sans-serif; padding: 24px; color: #0f172a;">
+        <h2 style="margin: 0 0 12px;">Payment Successful</h2>
+        <p style="margin: 0 0 12px;">Hi ${user.name},</p>
+        <p style="margin: 0 0 20px;">Your payment for <strong>${NOTES_TITLE}</strong> is successful.</p>
+        <a href="${driveLink}" style="display: inline-block; background: #2563eb; color: #ffffff; text-decoration: none; padding: 12px 20px; border-radius: 10px; font-weight: 700;">Open Google Drive Folder</a>
+        <p style="margin: 20px 0 0;">Drive permission status: ${driveAccessStatus}</p>
+      </div>
+    `,
+  });
+}
+
+async function finalizeDelivery({ orderId, paymentId, paymentStatus = "captured", source = "browser" }) {
+  let order = store.findOrderByOrderId(orderId);
+  if (!order) {
+    throw new Error("Order record not found.");
+  }
+
+  const user =
+    (order.user_id && store.findUserById(order.user_id)) ||
+    (order.user_email && store.findUserByEmail(order.user_email));
+
+  if (!user) {
+    throw new Error("User for this order was not found.");
+  }
+
+  if (!store.findPurchaseByPaymentId(paymentId)) {
+    store.createPurchase({
+      user_id: user.id,
+      email: user.email,
+      payment_id: paymentId,
+      order_id: orderId,
+      amount: order.amount || PRICE_INR * 100,
+      currency: order.currency || "INR",
+      drive_link: DRIVE_LINK,
+      drive_permission_status: "",
+      source,
+    });
+  }
+
+  let delivery =
+    store.findDeliveryByPaymentId(paymentId) ||
+    store.findDeliveryByOrderId(orderId) ||
+    store.createDelivery({
+      user_id: user.id,
+      name: user.name,
+      email: user.email,
+      payment_id: paymentId,
+      order_id: orderId,
+      amount: order.amount || PRICE_INR * 100,
+      currency: order.currency || "INR",
+      drive_link: DRIVE_LINK,
+      source,
+    });
+
+  const orderPatch = {
+    payment_id: paymentId,
+    payment_status: paymentStatus,
+    webhook_received: source === "webhook" ? 1 : order.webhook_received || 0,
+    status: "paid",
+    delivery_id: delivery.id,
+  };
+
+  if (delivery.email_sent) {
+    store.updateOrder(orderId, {
+      ...orderPatch,
+      delivery_processed: 1,
+    });
+    return {
+      delivery,
+      drivePermissionStatus: delivery.drive_access_status,
+      emailSent: true,
+      alreadyDelivered: true,
+    };
+  }
+
+  const drivePermission = await grantGoogleDriveAccess(user.email);
+  delivery = store.updateDelivery(delivery.id, {
+    drive_access_status: drivePermission.status,
+    last_error: "",
+  });
+
+  try {
+    await sendDeliveryEmail({
+      user,
+      driveAccessStatus: drivePermission.status,
+      driveLink: DRIVE_LINK,
+    });
+
+    delivery = store.updateDelivery(delivery.id, {
+      email_sent: 1,
+      email_sent_at: new Date().toISOString(),
+      last_error: "",
+      drive_access_status: drivePermission.status,
+    });
+    store.updateOrder(orderId, {
+      ...orderPatch,
+      delivery_processed: 1,
+    });
+
+    return {
+      delivery,
+      drivePermissionStatus: drivePermission.status,
+      emailSent: true,
+      alreadyDelivered: false,
+    };
+  } catch (error) {
+    delivery = store.updateDelivery(delivery.id, {
+      email_sent: 0,
+      last_error: error.message,
+      drive_access_status: drivePermission.status,
+    });
+    store.updateOrder(orderId, {
+      ...orderPatch,
+      delivery_processed: 0,
+    });
+    return {
+      delivery,
+      drivePermissionStatus: drivePermission.status,
+      emailSent: false,
+      alreadyDelivered: false,
+      error: error.message,
+    };
+  }
+}
+
+async function retryPendingDeliveries() {
+  const pendingDeliveries = store.findPendingDeliveries();
+
+  for (const delivery of pendingDeliveries) {
+    const user =
+      (delivery.user_id && store.findUserById(delivery.user_id)) ||
+      (delivery.email && store.findUserByEmail(delivery.email));
+
+    if (!user || !delivery.order_id || !delivery.payment_id) {
+      continue;
+    }
+
+    try {
+      await finalizeDelivery({
+        orderId: delivery.order_id,
+        paymentId: delivery.payment_id,
+        paymentStatus: "captured",
+        source: "retry",
+      });
+    } catch (error) {
+      store.updateDelivery(delivery.id, {
+        last_error: error.message,
+      });
+    }
+  }
+}
+
+function requireAuth(req, res, next) {
+  if (!req.session.userId) {
+    return res.status(401).json({ error: "Please verify OTP and login first." });
+  }
+  return next();
+}
+
+app.get("/api/config", (req, res) => {
+  const user = req.session.userId ? store.findUserById(req.session.userId) : null;
+  const paymentLiveReady = PAYMENT_PROVIDER === "razorpay" && hasRazorpayConfig;
+  const latestDelivery = user ? store.findLatestDeliveryByEmail(user.email) : null;
+
+  res.json({
+    appName: process.env.APP_NAME || "Notes Access Portal",
+    notesTitle: NOTES_TITLE,
+    notesDescription:
+      process.env.NOTES_DESCRIPTION ||
+      "Buy the notes and receive the Google Drive access link in your email.",
+    notesPriceInr: PRICE_INR,
+    paymentProvider: PAYMENT_PROVIDER,
+    paymentLiveReady,
+    razorpayKeyId: process.env.RAZORPAY_KEY_ID || "",
+    user,
+    latestDelivery: getDeliveryView(latestDelivery),
+  });
+});
+
+app.post("/api/auth/request-otp", async (req, res) => {
+  const name = String(req.body.name || "").trim();
+  const email = normalizeEmail(req.body.email);
+
+  if (!name || name.length < 2) {
+    return res.status(400).json({ error: "Please enter a valid name." });
+  }
+
+  if (!isValidGmail(email)) {
+    return res.status(400).json({ error: "Please enter a valid Gmail address." });
+  }
+
+  if (!transporter) {
+    return res.status(500).json({
+      error: "SMTP is not configured. Add your email settings in .env first.",
+    });
+  }
+
+  store.upsertUser(name, email);
+
+  const otp = generateOtp();
+  const expiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000).toISOString();
+
+  store.invalidateOtps(email);
+  store.createOtp(email, otp, expiresAt);
+
+  try {
+    await sendMail({
+      to: email,
+      subject: `${process.env.APP_NAME || "Notes Access Portal"} OTP Verification`,
+      text: `Your OTP is ${otp}. It will expire in ${OTP_TTL_MINUTES} minutes.`,
+      html: `
+        <div style="font-family: Arial, sans-serif; padding: 24px; color: #0f172a;">
+          <h2 style="margin: 0 0 12px;">OTP Verification</h2>
+          <p style="margin: 0 0 12px;">Use this OTP to login to the notes portal:</p>
+          <div style="font-size: 32px; font-weight: 700; letter-spacing: 8px; margin: 20px 0;">${otp}</div>
+          <p style="margin: 0;">This OTP will expire in ${OTP_TTL_MINUTES} minutes.</p>
+        </div>
+      `,
+    });
+
+    res.json({ ok: true, message: "OTP sent to your Gmail." });
+  } catch (error) {
+    res.status(500).json({ error: `Unable to send OTP email: ${error.message}` });
+  }
+});
+
+app.post("/api/auth/verify-otp", (req, res) => {
+  const email = normalizeEmail(req.body.email);
+  const otp = String(req.body.otp || "").trim();
+
+  const otpRow = store.findLatestActiveOtp(email);
+
+  if (!otpRow) {
+    return res.status(400).json({ error: "No active OTP found. Please request a new OTP." });
+  }
+
+  if (new Date(otpRow.expires_at).getTime() < Date.now()) {
+    return res.status(400).json({ error: "OTP expired. Please request a new OTP." });
+  }
+
+  if (otpRow.otp !== otp) {
+    return res.status(400).json({ error: "Incorrect OTP." });
+  }
+
+  store.markOtpUsed(otpRow.id);
+  const user = store.markUserVerified(email);
+
+  req.session.userId = user.id;
+  req.session.userEmail = user.email;
+
+  res.json({ ok: true, user });
+});
+
+app.post("/api/auth/logout", (req, res) => {
+  req.session.destroy(() => {
+    res.json({ ok: true });
+  });
+});
+
+app.post("/api/payment/create-order", requireAuth, async (req, res) => {
+  if (PAYMENT_PROVIDER === "razorpay") {
+    if (!razorpay) {
+      return res.status(500).json({ error: "Razorpay is not configured in .env." });
+    }
+
+    try {
+      const order = await razorpay.orders.create({
+        amount: PRICE_INR * 100,
+        currency: "INR",
+        receipt: `notes_${req.session.userId}_${Date.now()}`,
+        notes: {
+          product: NOTES_TITLE,
+          userId: String(req.session.userId),
+          email: req.session.userEmail || "",
+        },
+      });
+
+      const currentUser = store.findUserById(req.session.userId);
+      store.createOrder({
+        user_id: currentUser?.id || req.session.userId,
+        user_email: currentUser?.email || "",
+        order_id: order.id,
+        receipt: order.receipt,
+        amount: order.amount,
+        currency: order.currency,
+      });
+
+      return res.json({
+        provider: "razorpay",
+        orderId: order.id,
+        amount: order.amount,
+        currency: order.currency,
+      });
+    } catch (error) {
+      return res.status(500).json({ error: `Unable to create Razorpay order: ${error.message}` });
+    }
+  }
+
+  return res.json({
+    provider: "demo",
+    orderId: `demo_${Date.now()}`,
+    amount: PRICE_INR * 100,
+    currency: "INR",
+  });
+});
+
+app.post("/api/payment/verify", requireAuth, async (req, res) => {
+  const user = store.findUserById(req.session.userId);
+
+  if (!user) {
+    return res.status(404).json({ error: "User not found." });
+  }
+
+  let paymentId = "";
+  let orderId = "";
+
+  if (PAYMENT_PROVIDER === "razorpay") {
+    const {
+      razorpay_order_id: razorpayOrderId,
+      razorpay_payment_id: razorpayPaymentId,
+      razorpay_signature: razorpaySignature,
+    } = req.body;
+
+    const expectedSignature = crypto
+      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+      .update(`${razorpayOrderId}|${razorpayPaymentId}`)
+      .digest("hex");
+
+    if (expectedSignature !== razorpaySignature) {
+      return res.status(400).json({ error: "Payment verification failed." });
+    }
+
+    paymentId = razorpayPaymentId;
+    orderId = razorpayOrderId;
+  } else {
+    paymentId = `demo_payment_${Date.now()}`;
+    orderId = String(req.body.orderId || `demo_order_${Date.now()}`);
+    if (!store.findOrderByOrderId(orderId)) {
+      store.createOrder({
+        user_id: user.id,
+        user_email: user.email,
+        order_id: orderId,
+        receipt: orderId,
+        amount: PRICE_INR * 100,
+        currency: "INR",
+      });
+    }
+  }
+
+  const existingPurchase = store.findPurchaseByPaymentId(paymentId);
+
+  if (existingPurchase) {
+    const delivery = store.findDeliveryByPaymentId(paymentId) || store.findDeliveryByOrderId(orderId);
+    return res.json({
+      ok: true,
+      driveLink: (delivery && delivery.drive_link) || existingPurchase.drive_link,
+      deliveryEmailSent: delivery ? Boolean(delivery.email_sent) : true,
+      message: delivery?.email_sent
+        ? "Payment was already verified."
+        : "Payment is already verified. Delivery email is still pending retry.",
+    });
+  }
+
+  const deliveryResult = await finalizeDelivery({
+    orderId,
+    paymentId,
+    paymentStatus: "captured",
+    source: "browser",
+  });
+
+  res.json({
+    ok: true,
+    driveLink: DRIVE_LINK,
+    drivePermissionStatus: deliveryResult.drivePermissionStatus,
+    deliveryEmailSent: deliveryResult.emailSent,
+    message: deliveryResult.emailSent
+      ? "Payment verified and the access email has been sent."
+      : "Payment verified. Delivery email is pending retry.",
+  });
+});
+
+app.post("/api/razorpay/webhook", async (req, res) => {
+  if (PAYMENT_PROVIDER !== "razorpay" || !RAZORPAY_WEBHOOK_SECRET) {
+    return res.status(400).json({ error: "Razorpay webhook is not configured." });
+  }
+
+  const signature = req.get("X-Razorpay-Signature");
+  const body = req.body;
+  const rawBody = Buffer.isBuffer(body) ? body : Buffer.from(JSON.stringify(body || {}));
+  const expectedSignature = crypto
+    .createHmac("sha256", RAZORPAY_WEBHOOK_SECRET)
+    .update(rawBody)
+    .digest("hex");
+
+  if (!signature || signature !== expectedSignature) {
+    return res.status(400).json({ error: "Invalid webhook signature." });
+  }
+
+  const event = JSON.parse(rawBody.toString("utf8"));
+  const paymentEntity = event?.payload?.payment?.entity;
+
+  if (!paymentEntity) {
+    return res.json({ ok: true, ignored: true });
+  }
+
+  if (!["payment.captured", "order.paid"].includes(event.event)) {
+    return res.json({ ok: true, ignored: true, event: event.event });
+  }
+
+  const orderId = String(paymentEntity.order_id || "");
+  const paymentId = String(paymentEntity.id || "");
+
+  if (!orderId || !paymentId) {
+    return res.status(400).json({ error: "Missing order or payment id." });
+  }
+
+  let order = store.findOrderByOrderId(orderId);
+  if (!order) {
+    const userEmail =
+      normalizeEmail(paymentEntity.email) ||
+      normalizeEmail(paymentEntity.notes?.email) ||
+      normalizeEmail(paymentEntity.notes?.userEmail);
+    const user =
+      (paymentEntity.notes?.userId && store.findUserById(Number(paymentEntity.notes.userId))) ||
+      (userEmail && store.findUserByEmail(userEmail));
+
+    if (!user) {
+      return res.status(404).json({ error: "Order user could not be resolved." });
+    }
+
+    order = store.createOrder({
+      user_id: user.id,
+      user_email: user.email,
+      order_id: orderId,
+      receipt: paymentEntity.description || orderId,
+      amount: Number(paymentEntity.amount || PRICE_INR * 100),
+      currency: paymentEntity.currency || "INR",
+      webhook_received: 1,
+    });
+  } else {
+    store.updateOrder(orderId, { webhook_received: 1 });
+  }
+
+  try {
+    const result = await finalizeDelivery({
+      orderId,
+      paymentId,
+      paymentStatus: String(paymentEntity.status || "captured"),
+      source: "webhook",
+    });
+    return res.json({
+      ok: true,
+      emailSent: result.emailSent,
+      alreadyDelivered: result.alreadyDelivered,
+    });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+app.use((req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
+app.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
+  verifyMailTransport();
+  setInterval(() => {
+    retryPendingDeliveries().catch((error) => {
+      console.error(`Pending delivery retry failed: ${error.message}`);
+    });
+  }, DELIVERY_RETRY_INTERVAL_MS);
+});
