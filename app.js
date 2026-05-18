@@ -3,6 +3,8 @@ const state = {
   email: "",
   user: null,
   driveLink: "",
+  backendStatus: "warming",
+  backendWarmPromise: null,
   isRequestingOtp: false,
   isVerifyingOtp: false,
   isCreatingOrder: false,
@@ -38,6 +40,8 @@ const el = {
   welcomeText: document.getElementById("welcomeText"),
   successText: document.getElementById("successText"),
   driveLink: document.getElementById("driveLink"),
+  serviceHint: document.getElementById("serviceHint"),
+  serviceHintText: document.getElementById("serviceHintText"),
   requestOtpButton: document.getElementById("requestOtpButton"),
   verifyOtpButton: document.getElementById("verifyOtpButton"),
   payButton: document.getElementById("payButton"),
@@ -70,6 +74,18 @@ function showMessage(message, type = "success") {
 function hideMessage() {
   el.statusMessage.className = "status hidden";
   el.statusMessage.textContent = "";
+}
+
+function setBackendStatus(status, message = "") {
+  state.backendStatus = status;
+  if (status === "ready") {
+    el.serviceHint.classList.add("is-ready");
+    el.serviceHintText.textContent = message || "Secure delivery service is ready for OTP and payment.";
+    return;
+  }
+
+  el.serviceHint.classList.remove("is-ready");
+  el.serviceHintText.textContent = message || "Preparing secure delivery service in the background...";
 }
 
 function formatInr(value) {
@@ -287,6 +303,39 @@ async function api(url, options = {}) {
   return data;
 }
 
+async function warmBackend({ blocking = false } = {}) {
+  if (state.backendStatus === "ready") {
+    return true;
+  }
+
+  if (!state.backendWarmPromise) {
+    setBackendStatus("warming");
+    state.backendWarmPromise = api("/api/health", { method: "GET" })
+      .then(() => {
+        setBackendStatus("ready");
+        return true;
+      })
+      .catch(() => {
+        setBackendStatus("warming", "Delivery service will wake automatically on your first secure action.");
+        return false;
+      })
+      .finally(() => {
+        state.backendWarmPromise = null;
+      });
+  }
+
+  if (!blocking) {
+    return state.backendWarmPromise;
+  }
+
+  return Promise.race([
+    state.backendWarmPromise,
+    new Promise((resolve) => {
+      window.setTimeout(() => resolve(false), 2200);
+    }),
+  ]);
+}
+
 async function loadConfig() {
   const cachedConfig = readCachedConfig();
   if (cachedConfig) {
@@ -298,6 +347,7 @@ async function loadConfig() {
   }
 
   try {
+    warmBackend();
     const data = await api("/api/config", { method: "GET" });
     writeCachedConfig(data);
     applyConfig(data);
@@ -325,7 +375,13 @@ async function handleRegister(event) {
   state.isRequestingOtp = true;
   setButtonState(el.requestOtpButton, true);
   hideMessage();
-  showMessage("Sending OTP to the registered Gmail account...", "success");
+  showMessage(
+    state.backendStatus === "ready"
+      ? "Sending OTP to the registered Gmail account..."
+      : "Waking secure delivery service and sending OTP...",
+    "success"
+  );
+  await warmBackend({ blocking: true });
 
   const payload = {
     name: el.name.value.trim(),
@@ -420,7 +476,13 @@ async function handlePayment() {
   state.isCreatingOrder = true;
   setButtonState(el.payButton, true);
   hideMessage();
-  showMessage("Preparing your secure Razorpay checkout...", "success");
+  showMessage(
+    state.backendStatus === "ready"
+      ? "Preparing your secure Razorpay checkout..."
+      : "Waking secure payment service and preparing checkout...",
+    "success"
+  );
+  await warmBackend({ blocking: true });
 
   try {
     const order = await api("/api/payment/create-order", {

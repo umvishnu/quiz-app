@@ -570,6 +570,10 @@ function requireAuth(req, res, next) {
   return next();
 }
 
+app.get("/api/health", (req, res) => {
+  res.json({ ok: true, service: "study-board", now: new Date().toISOString() });
+});
+
 app.get("/api/config", async (req, res) => {
   const runtimeConfig = await getRuntimeConfig();
   const user = req.session.userId ? store.findUserById(req.session.userId) : null;
