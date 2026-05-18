@@ -1,0 +1,8 @@
+[build]
+  publish = "public"
+
+[[redirects]]
+  from = "/api/*"
+  to = "https://study-board-4d7c.onrender.com/api/:splat"
+  status = 200
+  force = true
